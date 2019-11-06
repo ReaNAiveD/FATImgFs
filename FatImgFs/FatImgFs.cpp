@@ -176,6 +176,21 @@ inline int getDateStartAddress(int clusNum, FsInfo info) {
 	return info.dataFrom + (clusNum - 2) * info.clusSize;
 }
 
+int getNext(int currentClus, std::ifstream input, FsInfo info) {
+	int pos = info.fatFrom + currentClus / 2 * 3;
+	input.seekg(pos);
+	if (currentClus % 2 == 0){
+		int result = ((unsigned int)input.get()) << 4;
+		result += ((unsigned int)input.get()) >> 4;
+		return result;
+	}
+	else {
+		input.get();
+		int result = ((unsigned int)(input.get() & 0xf)) << 8;
+		result += (unsigned int)input.get();
+	}
+}
+
 int main()
 {
 	std::string filename = "D:\\nice-\\Code\\FatImgFs\\a.img";

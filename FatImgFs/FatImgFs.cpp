@@ -58,7 +58,7 @@ struct FsInfo {
 
 struct EntryByte
 {
-	char name[13];
+	char name[11];
 	char attr[1];
 	char reserved[1];
 	char creationSecond[1];
@@ -73,14 +73,13 @@ struct EntryByte
 };
 
 struct Entry {
-	char name[13];
+	char name[11];
 	bool readOnly;
 	bool hidden;
 	bool system;
 	bool volumeId;
 	bool directory;
 	bool archieve;
-	bool lfn;
 	Time createTime;
 	Date createDate;
 	Date accessDate;
@@ -94,11 +93,27 @@ struct LFNEntryByte {
 	char order[1];
 	char first5[10];
 	char attr[1];
+	char entryType[1];
 	char checkSum[1];
 	char next6[12];
 	char zero[2];
 	char final2[4];
 };
+
+struct Node {
+	char name[53] = { 0 };
+	Entry entry;
+	Node* next;
+	Node* child;
+};
+
+void myPrint(char* str) {
+	std::cout << str;
+}
+
+void redPrint(char* str) {
+	std::cout << str;
+}
 
 Time convertTime(char const* time) {
 	Time result;
@@ -138,7 +153,7 @@ bool isLFN(EntryByte const* entry) {
 
 Entry buildEntry(EntryByte const* entry) {
 	Entry result;
-	for (int i = 0; i < 13; i++) {
+	for (int i = 0; i < 11; i++) {
 		result.name[i] = entry->name[i];
 	}
 	char READ_ONLY = 0x01;
@@ -160,6 +175,22 @@ Entry buildEntry(EntryByte const* entry) {
 	result.modiDate = convertDate(entry->modiDate);
 	result.clusterNum = (int) * (short*)(entry->lowClus);
 	result.size = *(int*)(entry->size);
+	return result;
+}
+
+void getLFName(LFNEntryByte const* entry, char* name) {
+	for (int i = 0; i < 5; i++) {
+		*name = entry->first5[i * 2];
+		name++;
+	}
+	for (int i = 0; i < 6; i++) {
+		*name = entry->next6[i * 2];
+		name++;
+	}
+	for (int i = 0; i < 2; i++) {
+		*name = entry->final2[i * 2];
+		name++;
+	}
 }
 
 FsInfo computeBaseInfo(BootRecord const* record) {
@@ -172,23 +203,409 @@ FsInfo computeBaseInfo(BootRecord const* record) {
 	return result;
 }
 
-inline int getDateStartAddress(int clusNum, FsInfo info) {
+inline int getDataStartAddress(int clusNum, FsInfo info) {
 	return info.dataFrom + (clusNum - 2) * info.clusSize;
 }
 
-int getNext(int currentClus, std::ifstream input, FsInfo info) {
+int getNext(int currentClus, std::ifstream &input, FsInfo info) {
 	int pos = info.fatFrom + currentClus / 2 * 3;
 	input.seekg(pos);
 	if (currentClus % 2 == 0){
-		int result = ((unsigned int)input.get()) << 4;
-		result += ((unsigned int)input.get()) >> 4;
+		int result = ((unsigned int)input.get());
+		result += ((unsigned int)(input.get() & 0xf)) << 8;
 		return result;
 	}
 	else {
 		input.get();
-		int result = ((unsigned int)(input.get() & 0xf)) << 8;
-		result += (unsigned int)input.get();
+		int result = ((unsigned int)input.get()) >> 4;
+		result += ((unsigned int)input.get()) << 4;
+		return result;
 	}
+}
+
+Node* getDirStructure(std::ifstream& input, FsInfo info, int clus) {
+	Node* first = nullptr;
+	char name[53] = { 0 };
+	char* lfnNameSave = &name[52];
+	Node* latestNode = nullptr;
+	int currentClus = clus;
+	while (currentClus < 0xFF7) {
+		input.seekg(getDataStartAddress(currentClus, info));
+		for (int i = 0; i < info.clusSize / sizeof(EntryByte); i++) {
+			EntryByte entry;
+			char* currentRead = (char*)&entry;
+			for (int i = 0; i < sizeof(EntryByte); i++) {
+				*currentRead = input.get();
+				currentRead++;
+			}
+			if (entry.name[0] == 15 || entry.name[0] == 0) {
+				continue;
+			}
+			if (isLFN(&entry)) {
+				lfnNameSave -= 13;
+				getLFName((LFNEntryByte*)&entry, lfnNameSave);
+			}
+			else {
+				Entry normalEntry = buildEntry(&entry);
+				Node* node = new Node;
+				node->entry = normalEntry;
+				if (latestNode != nullptr) {
+					latestNode->next = node;
+					latestNode = node;
+				}
+				else {
+					first = node;
+					latestNode = node;
+				}
+				node->next = nullptr;
+				if (lfnNameSave == &name[52]) {
+					char* namep = node->name;
+					char* nameEntryp = entry.name;
+					if (!node->entry.directory) {
+						for (int i = 0; i < 8 && *nameEntryp != 0 && *nameEntryp != 0x20; i++) {
+							*namep = *nameEntryp;
+							namep++;
+							nameEntryp++;
+						}
+						*namep = '.';
+						namep++;
+						nameEntryp = &entry.name[8];
+						for (int i = 0; i < 3 && *nameEntryp != 0 && *nameEntryp != 0x20; i++) {
+							*namep = *nameEntryp;
+							namep++;
+							nameEntryp++;
+						}
+					}
+					else {
+						for (int i = 0; i < 11 && *nameEntryp != 0 && *nameEntryp != 0x20; i++) {
+							*namep = *nameEntryp;
+							namep++;
+							nameEntryp++;
+						}
+					}
+				}
+				else {
+					char* namep = node->name;
+					while (*lfnNameSave != 0) {
+						*namep = *lfnNameSave;
+						namep++;
+						lfnNameSave++;
+					}
+					lfnNameSave = &name[52];
+				}
+			}
+		}
+		currentClus = getNext(currentClus, input, info);
+	}
+	Node* current = first;
+	if (current != nullptr) {
+		current->child = first;
+		current = current->next;
+	}
+	if (current != nullptr) {
+		current = current->next;
+	}
+	while (current != nullptr) {
+		if (current->entry.directory) {
+			current->child = getDirStructure(input, info, current->entry.clusterNum);
+			if (current->child != nullptr && current->child->next != nullptr) {
+				current->child->next->child = first;
+			}
+		}
+		else {
+			current->child = nullptr;
+		}
+		current = current->next;
+	}
+	return first;
+}
+
+Node* getDirStructure(std::ifstream &input, FsInfo info) {
+	input.seekg(info.dirFrom);
+	Node* first = nullptr;
+	char name[53] = { 0 };
+	char* lfnNameSave = &name[52];
+	Node* latestNode = nullptr;
+	while(input.tellg() < info.dataFrom) {
+		EntryByte entry;
+		char* currentRead = (char*)&entry;
+		for (int i = 0; i < sizeof(EntryByte); i++) {
+			*currentRead = input.get();
+			currentRead++;
+		}
+		if (entry.name[0] == 15) {
+			continue;
+		}
+		if (isLFN(&entry)) {
+			lfnNameSave -= 13;
+			getLFName((LFNEntryByte*)&entry, lfnNameSave);
+		}
+		else {
+			if (entry.lowClus[0] == 0 && entry.lowClus[1] == 0) {
+				continue;
+			}
+			Entry normalEntry = buildEntry(&entry);
+			Node* node = new Node;
+			node->entry = normalEntry;
+			if (latestNode != nullptr) {
+				latestNode->next = node;
+				latestNode = node;
+			}
+			else {
+				first = node;
+				latestNode = node;
+			}
+			node->next = nullptr;
+			if (lfnNameSave == &name[52]) {
+				char* namep = node->name;
+				char* nameEntryp = entry.name;
+				if (!node->entry.directory) {
+					for (int i = 0; i < 8 && *nameEntryp != 0 && *nameEntryp != 0x20; i++) {
+						*namep = *nameEntryp;
+						namep++;
+						nameEntryp++;
+					}
+					*namep = '.';
+					namep++;
+					nameEntryp = &entry.name[8];
+					for (int i = 0; i < 3 && *nameEntryp != 0 && *nameEntryp != 0x20; i++) {
+						*namep = *nameEntryp;
+						namep++;
+						nameEntryp++;
+					}
+				}
+				else {
+					for (int i = 0; i < 11 && *nameEntryp != 0 && *nameEntryp != 0x20; i++) {
+						*namep = *nameEntryp;
+						namep++;
+						nameEntryp++;
+					}
+				}
+			}
+			else {
+				char* namep = node->name;
+				while (*lfnNameSave != 0) {
+					*namep = *lfnNameSave;
+					namep++;
+					lfnNameSave++;
+				}
+				lfnNameSave = &name[52];
+			}
+		}
+	}
+	Node* current = first;
+	while (current != nullptr) {
+		if (current->entry.directory) {
+			current->child = getDirStructure(input, info, current->entry.clusterNum);
+			if (current->child != nullptr && current->child->next != nullptr) {
+				current->child->next->child = first;
+			}
+		}
+		else {
+			current->child = nullptr;
+		}
+		current = current->next;
+	}
+	return first;
+}
+
+Node* resolve(char* path, Node* root, bool isDir) {
+	char* pathp = path;
+	Node* dir = root;
+	if (*pathp == 0 || path[1] == 0) {
+		if (isDir) {
+			return root;
+		}
+		else {
+			return nullptr;
+		}
+	}
+	pathp++;
+	while (true) {
+		char fileName[53] = { 0 };
+		char* cpp = &fileName[0];
+		bool end = false;
+		while (*pathp != 0 && *pathp != '/') {
+			*cpp = *pathp;
+			cpp++;
+			pathp++;
+		}
+		if (*pathp == 0) {
+			end = true;
+		}
+		else {
+			pathp++;
+			if (*pathp == 0) {
+				end = true;
+			}
+		}
+		while (dir != nullptr) {
+			cpp = &fileName[0];
+			char* dirName = dir->name;
+			while (*dirName == *cpp && *cpp != 0) {
+				dirName++;
+				cpp++;
+			}
+			if (*dirName == 0 && *cpp == 0) {
+				if (dir->entry.directory && !end) {
+					dir = dir->child;
+					break;
+				}
+				else if (!dir->entry.directory && end && !isDir) {
+					return dir;
+				}
+				else if (dir->entry.directory && end && isDir) {
+					return dir->child;
+				}
+			}
+			dir = dir->next;
+		}
+		if (dir == nullptr) {
+			return nullptr;
+		}
+	}
+}
+
+int dirCount(Node* node) {
+	Node* currentNode = node;
+	int result = 0;
+	while (currentNode != nullptr){
+		if (currentNode->entry.directory && !(currentNode->name[0] == '.' && currentNode->name[1] == 0) 
+			&& !(currentNode->name[0] == '.' && currentNode->name[1] == '.' && currentNode->name[2] == 0))
+			result++;
+		currentNode = currentNode->next;
+	}
+	return result;
+}
+
+int fileCount(Node* node) {
+	Node* currentNode = node;
+	int result = 0;
+	while (currentNode != nullptr) {
+		if (!currentNode->entry.directory)
+			result++;
+		currentNode = currentNode->next;
+	}
+	return result;
+}
+
+void printDir(Node* node, char* related,bool detailed) {
+	myPrint(related);
+	if (detailed) {
+		myPrint(" ");
+		char count[20];
+		_itoa_s(dirCount(node), count, 20, 10);
+		myPrint(count);
+		myPrint(" ");
+		_itoa_s(fileCount(node), count, 20, 10);
+		myPrint(count);
+	}
+	myPrint(":\n");
+	Node* currentNode = node;
+	while (currentNode != nullptr) {
+		if (currentNode->entry.directory) {
+			redPrint(currentNode->name);
+			myPrint(" ");
+			if (detailed && !(currentNode->name[0] == '.' && currentNode->name[1] == 0)
+				&& !(currentNode->name[0] == '.' && currentNode->name[1] == '.' && currentNode->name[2] == 0)) {
+				char count[20];
+				_itoa_s(dirCount(currentNode->child), count, 20, 10);
+				myPrint(count);
+				myPrint(" ");
+				_itoa_s(fileCount(currentNode->child), count, 20, 10);
+				myPrint(count);
+			}
+			if (detailed) {
+				myPrint("\n");
+			}
+		}
+		else {
+			myPrint(currentNode->name);
+			myPrint(" ");
+			if (detailed) {
+				char count[20];
+				_itoa_s(currentNode->entry.size, count, 20, 10);
+				myPrint(count);
+				myPrint("\n");
+			}
+		}
+		currentNode = currentNode->next;
+	}
+	myPrint("\n");
+
+	currentNode = node;
+	while (currentNode != nullptr) {
+		if (currentNode->entry.directory && !(currentNode->name[0] == '.' && currentNode->name[1] == 0)
+			&& !(currentNode->name[0] == '.' && currentNode->name[1] == '.' && currentNode->name[2] == 0)) {
+			char relatedStr[50] = { 0 };
+			char* pathp = related;
+			char* relatedStrp = &relatedStr[0];
+			while (*pathp != 0) {
+				*relatedStrp = *pathp;
+				relatedStrp++;
+				pathp++;
+			}
+			pathp = currentNode->name;
+			while (*pathp != 0) {
+				*relatedStrp = *pathp;
+				relatedStrp++;
+				pathp++;
+			}
+			*relatedStrp = '/';
+			relatedStrp++;
+			printDir(currentNode->child, relatedStr, detailed);
+		}
+		currentNode = currentNode->next;
+	}
+}
+
+void ls(char* path, bool detailed, Node* root){
+	Node* related = resolve(path, root, true);
+	if (related == nullptr) {
+		myPrint("cannot resolve path\n");
+		return;
+	}
+	char relatedStr[50] = { 0 };
+	char* pathp = path;
+	char* relatedStrp = &relatedStr[0];
+	while (*pathp != 0) {
+		*relatedStrp = *pathp;
+		relatedStrp++;
+		pathp++;
+	}
+	if (path[0] != 0) {
+		relatedStrp--;
+		if (*relatedStrp != '/') {
+			relatedStrp++;
+			*relatedStrp = '/';
+		}
+	}
+	else {
+		*relatedStrp = '/';
+	}
+	relatedStrp++;
+	printDir(related, relatedStr, detailed);
+}
+
+void cat(char* path, Node* root, std::ifstream& input, FsInfo info) {
+	Node* fileNode = resolve(path, root, false);
+	if (fileNode == nullptr) {
+		myPrint("cannot resolve path\n");
+		return;
+	}
+	int currentClus = fileNode->entry.clusterNum;
+	char* buffer = new char[info.clusSize + 1];
+	buffer[info.clusSize] = 0;
+	while (currentClus < 0xFF7) {
+		input.seekg(getDataStartAddress(currentClus, info));
+		char* writerp = buffer;
+		for (int i = 0; i < info.clusSize; i++) {
+			buffer[i] = input.get();
+		}
+		myPrint(buffer);
+		currentClus = getNext(currentClus, input, info);
+	}
+	delete[]buffer;
 }
 
 int main()
@@ -204,6 +621,7 @@ int main()
 	}
 	completeBoot(&record);
 	FsInfo fsInfo = computeBaseInfo(&record);
+	Node* root = getDirStructure(inputFile, fsInfo);
 	while (true) {
 		char commandLine[100];
 		std::cin.getline(commandLine, 100);
@@ -252,12 +670,12 @@ int main()
 		
 		if (cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'i' && cmd[3] == 't' && cmd[4] == 0) {
 			if (arg[0] != 0){
-				std::cout << "exit command need no args" << std::endl;
-				std::cout << "command: exit" << std::endl;
+				myPrint("exit command need no args\n");
+				myPrint("command: exit\n");
 				continue;
 			}
 			else if (flags[0] != 0){
-				std::cout << "exit command cannot recognize flag" << std::endl;
+				myPrint("exit command cannot recognize flag\n");
 				continue;
 			}
 			else{
@@ -266,27 +684,27 @@ int main()
 		}
 		else if (cmd[0] == 'c' && cmd[1] == 'a' && cmd[2] == 't' && cmd[3] == 0) {
 			if (arg[0] == 0){
-				std::cout << "cat command need file path" << std::endl;
-				std::cout << "command: cat [file]" << std::endl;
+				myPrint("cat command need file path\n");
+				myPrint("command: cat [file]\n");
 				continue;
 			}
 			else if (tooManyArgs){
-				std::cout << "cat command need exactly one file path" << std::endl;
-				std::cout << "command: cat [file]" << std::endl;
+				myPrint("cat command need exactly one file path\n");
+				myPrint("command: cat [file]\n");
 				continue;
 			}
 			else if (flags[0] != 0){
-				std::cout << "cat command cannot recognize flag" << std::endl;
+				myPrint("cat command cannot recognize flag\n");
 				continue;
 			}
 			else{
-				
+				cat(arg, root, inputFile, fsInfo);
 			}
 		}
 		else if (cmd[0] == 'l' && cmd[1] == 's' && cmd[2] == 0){
 			if (tooManyArgs){
-				std::cout << "ls command need no more than one file path" << std::endl;
-				std::cout << "command: ls [file] [options]" << std::endl;
+				myPrint("ls command need no more than one file path\n");
+				myPrint("command: ls [file] [options]\n");
 				continue;
 			}
 			bool detailed = false;
@@ -303,12 +721,13 @@ int main()
 				currentFlag++;
 			}
 			if (flagErr){
-				std::cout << "ls command cannot recognize flag" << std::endl;
+				myPrint("ls command cannot recognize flag\n");
 				continue;
 			}
 			if (arg[0] == 0){
-				arg[0] == '/';
+				arg[0] = '/';
 			}
+			ls(arg, detailed, root);
 		}
 	}
 	return 0;

@@ -1,3 +1,6 @@
+global	myPrint
+global	redPrint
+
     section .text
 
 myPrint:

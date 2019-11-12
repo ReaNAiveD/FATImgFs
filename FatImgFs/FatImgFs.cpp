@@ -2,6 +2,7 @@
 //
 
 #include "FatImgFs.h"
+#include "print.h"
 
 struct Date
 {
@@ -106,14 +107,6 @@ struct Node {
 	Node* next;
 	Node* child;
 };
-
-void myPrint(char* str) {
-	std::cout << str;
-}
-
-void redPrint(char* str) {
-	std::cout << str;
-}
 
 Time convertTime(char const* time) {
 	Time result;
@@ -494,10 +487,10 @@ void printDir(Node* node, char* related,bool detailed) {
 	if (detailed) {
 		myPrint(" ");
 		char count[20];
-		_itoa_s(dirCount(node), count, 20, 10);
+		snprintf(count, 20, "%d", dirCount(node));
 		myPrint(count);
 		myPrint(" ");
-		_itoa_s(fileCount(node), count, 20, 10);
+		snprintf(count, 20, "%d", fileCount(node));
 		myPrint(count);
 	}
 	myPrint(":\n");
@@ -509,10 +502,10 @@ void printDir(Node* node, char* related,bool detailed) {
 			if (detailed && !(currentNode->name[0] == '.' && currentNode->name[1] == 0)
 				&& !(currentNode->name[0] == '.' && currentNode->name[1] == '.' && currentNode->name[2] == 0)) {
 				char count[20];
-				_itoa_s(dirCount(currentNode->child), count, 20, 10);
+				snprintf(count, 20, "%d", dirCount(currentNode->child));
 				myPrint(count);
 				myPrint(" ");
-				_itoa_s(fileCount(currentNode->child), count, 20, 10);
+				snprintf(count, 20, "%d", fileCount(currentNode->child));
 				myPrint(count);
 			}
 			if (detailed) {
@@ -524,7 +517,7 @@ void printDir(Node* node, char* related,bool detailed) {
 			myPrint(" ");
 			if (detailed) {
 				char count[20];
-				_itoa_s(currentNode->entry.size, count, 20, 10);
+				snprintf(count, 20, "%d", currentNode->entry.size);
 				myPrint(count);
 				myPrint("\n");
 			}
@@ -610,7 +603,7 @@ void cat(char* path, Node* root, std::ifstream& input, FsInfo info) {
 
 int main()
 {
-	std::string filename = "D:\\nice-\\Code\\FatImgFs\\a.img";
+	std::string filename = "/home/naived/FATImgFs/ref.img";
 	//std::string filename = "a.img";
 	std::ifstream inputFile(filename, std::ios::binary);
 	BootRecord record;

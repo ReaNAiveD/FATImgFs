@@ -1,63 +1,67 @@
-global	myPrint
-global	redPrint
+
 
     section .text
 
-myPrint:
+global	_Z7myPrintPKc
+global	_Z8redPrintPKc
+
+_Z7myPrintPKc:
     push    rax
-    push    rbx
-    push    rcx
+    push    rdi
+    push    rsi
     push    rdx
-    mov rcx,    rdi
+    mov rsi,    rdi
 nextChar:
-    cmp byte[rcx],    0
+    cmp byte[rsi],    0
     je  endPrint
-    mov rax,    4
-    mov rbx,    1
+    mov rax,    1
+    mov rdi,    1
     mov rdx,    1
-    int 80h
-    inc rcx
+    syscall
+    inc rsi
     jmp nextChar
 endPrint:
     pop rdx
-    pop rcx
-    pop rbx
+    pop rsi
+    pop rdi
     pop rax
     ret
 
-redPrint:
+_Z8redPrintPKc:
     push    rax
-    push    rbx
-    push    rcx
     push    rdx
-    mov rax,    4
-    mov rbx,    1
-    mov rcx,    startRed
+    push    rsi
+    push    rdi
+    mov rax,    1
+    mov rdi,    1
+    mov rsi,    startRed
     mov rdx,    startRedLen
-    int 80h
-    mov rcx,    rdi
+    syscall
+    pop rdi
+    mov rsi,    rdi
 redNextChar:
-    cmp byte[rcx],    0
+    cmp byte[rsi],    0
     je  redEndPrint
+    mov rax,    1
+    mov rdi,    1
     mov rdx,    1
-    int 80h
-    inc rcx
+    syscall
+    inc rsi
     jmp redNextChar
 redEndPrint:
-    mov rax,    4
-    mov rbx,    1
-    mov rcx,    endRed
+    mov rax,    1
+    mov rdi,    1
+    mov rsi,    endRed
     mov rdx,    endRedLen
-    int 80h
+    syscall
+    pop rsi
     pop rdx
-    pop rcx
-    pop rbx
     pop rax
     ret
 
     section .data:
-startRed:   db  33, "[31m"
+startRed:   db  1Bh,"[31m"
 startRedLen equ $-startRed
 
-endRed: db  33, "[0m"
+endRed: db  1Bh,"[0m"
 endRedLen   equ $-endRed

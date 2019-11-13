@@ -603,7 +603,7 @@ void cat(char* path, Node* root, std::ifstream& input, FsInfo info) {
 
 int main()
 {
-	std::string filename = "/home/naived/FATImgFs/ref.img";
+	std::string filename = "/home/naived/FATImgFs/a.img";
 	//std::string filename = "a.img";
 	std::ifstream inputFile(filename, std::ios::binary);
 	BootRecord record;
